@@ -15,6 +15,10 @@ mm = MarkovMongo(dbname='kafka', coll='metamorphosis')
     
 # Takes a while, depending on size of source
 mm.insertwords('metamorphosis.txt')
+
+# If you're inserting into a new collection, supply the argument update=False
+# for a faster insert
+mm.insertwords('metamorphosis.txt', update=false)
     
 mm.generate()
     'He realised what had happened but she left within a quarter of an hour, tearfully thanking Gregor's mother would tug at her skirt to show the whole, innocent family that this job would provide for Gregor for his decision. Mr. Samsa might go to Hell! He felt a itch.'    

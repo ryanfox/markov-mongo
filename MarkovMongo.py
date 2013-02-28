@@ -2,71 +2,84 @@ import random
 from pymongo import MongoClient
 
 class MarkovMongo(object):
-    ''' Markov Chain implementation in python with storage in MongoDB.
-    Currently only supports 2nd-order Markov Chains. '''
+    ''' Markov Chain implementation in python with storage in MongoDB.'''
     
-    def __init__(self, uri=None, dbname='testdb', coll='testcoll'):
+    def __init__(self, uri=None, dbname='testdb', coll='testcoll', order=2):
         connection = MongoClient(uri)
         db = connection[dbname]
         self.collection = db[coll]
         self.size = self.collection.count()
+        self.order = order
+        self.punctuation = ('.', '!', '?')
     
     
-    def insertwords(self, filename):
-        ''' Read a file, parse into triples, and insert into db.
-        Updates record if key already exists in db. '''
+    def insertwords(self, filename, update=True):
+        ''' Read a file, parse into tuples, and insert into db.
+        Be default, updates records instead of duplicating. '''
         with open(filename) as f:
             chains = {}
-            for w1, w2, w3 in self.triples(f.read().split()):
-                key = (w1, w2)
+            for tup in self.split(f.read().split()):
+                key = tuple(tup[:-1])
                 if key in chains:
-                    chains[key].append(w3)
+                    chains[key].append(tup[-1])
                 else:
-                    chains[key] = [w3]
-            
-            for i, key in enumerate(chains):
-                self.collection.update({'key': key}, {'$set': {'key': key, 'words': chains[key], 'i': i}}, upsert=True)
+                    chains[key] = [tup[-1]]
+
+            # Don't overwrite documents if we're updating            
+            if update:
+                for i, key in enumerate(chains):
+                        self.collection.update({'key': key}, {'$set': {'key': key, 'words': chains[key], 'i': i}}, upsert=True)
+            else: # Upload all new docs
+                self.collection.insert(({'i': i, 'key': key, 'words': chains[key]} for i, key in enumerate(chains)))
             self.size = self.collection.count()
             
     
     def getwords(self, key):
         ''' Get the list of words from the database corresponding to
         the supplied key.  Key should be a tuple containing two strings. '''
-        return self.collection.find_one({'key': key})['words']
+        result = self.collection.find_one({'key': key})
+        while result == None:
+            result = self.collection.find_one({'i': random.randint(0, self.size)})
+        return result['words']
     
     
-    def triples(self, words):
-        ''' Parse the supplied string into 3-word chunks.  For example, the string
-    'One small step for man' would yield:
+    def split(self, words):
+        ''' Parse the supplied string into n-word chunks.  For example,
+    parsing 'One small step for man' into order-3 chunks would yield:
     ('One', 'small', 'step'),
     ('small', 'step', 'for'),
     ('step', 'for', 'man')'''
-        if len(words) < 3:
+        if len(words) < self.order + 1:
             return
             
-        for i in xrange(len(words) - 2):
-            yield (words[i], words[i + 1], words[i + 2])
+        for i in xrange(len(words) - self.order):
+            yield words[i : i + self.order + 1]
 
 
     def generate(self, seed=None, length=random.randint(25, 50)):
-        ''' Generate text from the corpus in the database.  A seed may optionally
-    be supplied.  If so, the seed should be a tuple containing 2 strings. '''
+        ''' Generate text from the corpus in the database.  A seed may
+    optionally be supplied.  If so, the seed should be a tuple or list
+    containing n strings, where n is the order of the chain. '''
         if seed == None:
-            seed = random.randint(0, self.size - 3)
+            seed = random.randint(0, self.size - (self.order + 1))
             row = self.collection.find_one({'i': seed})
         else:
             row = self.collection.find_one({'key': seed})
-        w1, w2 = row['key']
-        words = []
-        for i in xrange(length):
-            words.append(w1)
-            temp = w2
-            w2 = random.choice(self.getwords((w1, w2)))
-            w1 = temp
+        key = row['key']
+        words = key[:]
+        for i in xrange(length - self.order):
+            newword = random.choice(self.getwords(key))
+            words.append(newword)
+            key.reverse()
+            key.pop()
+            key.reverse()
+            key.append(newword)
+        
+        if words[-1][-1] == ',':
+            words[-1][-1] = '.'
+        if not words[-1][-1] in self.punctuation:
+            words[-1] += '.'
 
-        if not w2.endswith('.'):
-            w2 += '.'
-        words.append(w2)        
         return ' '.join(words)
         
         
